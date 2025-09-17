@@ -6,6 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>康复数据管理系统</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
     <style>
         * {
             margin: 0;
@@ -34,11 +39,40 @@
             color: white;
             padding: 30px;
             text-align: center;
+            position: relative;
         }
 
         .header h1 {
             font-size: 28px;
             margin-bottom: 10px;
+        }
+
+        .connection-status {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-connected {
+            background: rgba(76, 175, 80, 0.2);
+            color: #4caf50;
+            border: 1px solid rgba(76, 175, 80, 0.4);
+        }
+
+        .status-disconnected {
+            background: rgba(244, 67, 54, 0.2);
+            color: #f44336;
+            border: 1px solid rgba(244, 67, 54, 0.4);
+        }
+
+        .status-connecting {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ff9800;
+            border: 1px solid rgba(255, 193, 7, 0.4);
         }
 
         .main-content {
@@ -72,6 +106,24 @@
             border-radius: 10px;
             margin-bottom: 30px;
             border: 1px solid #c8e6c9;
+        }
+
+        .firebase-config {
+            background: #fff3e0;
+            border: 1px solid #ffb74d;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+
+        .config-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: monospace;
+            margin-bottom: 10px;
         }
 
         .form-group {
@@ -111,6 +163,12 @@
             text-decoration: none;
             display: inline-block;
             text-align: center;
+            margin: 5px;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
 
         .btn-primary {
@@ -118,7 +176,7 @@
             color: white;
         }
 
-        .btn-primary:hover {
+        .btn-primary:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 8px 25px rgba(79, 172, 254, 0.3);
         }
@@ -128,13 +186,18 @@
             color: white;
         }
 
-        .btn-success:hover {
+        .btn-success:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 8px 25px rgba(17, 153, 142, 0.3);
         }
 
         .btn-info {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-warning {
+            background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
             color: white;
         }
 
@@ -166,7 +229,7 @@
 
         .data-item-header {
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
             align-items: center;
             margin-bottom: 8px;
         }
@@ -319,10 +382,36 @@
             border: 1px solid #f5c6cb;
         }
 
+        .status-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
         .loading {
             text-align: center;
             padding: 40px;
             color: #6c757d;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #4facfe;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
         }
 
         @media (max-width: 768px) {
@@ -333,6 +422,14 @@
             .charts-container {
                 grid-template-columns: 1fr;
             }
+
+            .connection-status {
+                position: relative;
+                top: auto;
+                right: auto;
+                margin-top: 10px;
+                display: inline-block;
+            }
         }
     </style>
 </head>
@@ -340,13 +437,29 @@
 <body>
     <div class="container">
         <div class="header">
+            <div class="connection-status" id="connectionStatus">正在连接...</div>
             <h1>🏥 康复数据管理系统</h1>
-            <p>上传、存储、查看康复训练数据 | 支持多患者数据管理</p>
+            <p>上传、存储、查看康复训练数据 | 支持多患者数据管理 | 云端同步</p>
         </div>
 
         <div class="main-content">
             <!-- 侧边栏 -->
             <div class="sidebar">
+                <!-- Firebase配置区域 -->
+                <div class="firebase-config" id="firebaseConfig">
+                    <h3 class="section-title">🔥 Firebase配置</h3>
+                    <input type="text" class="config-input" id="apiKey" placeholder="API Key">
+                    <input type="text" class="config-input" id="authDomain" placeholder="Auth Domain">
+                    <input type="text" class="config-input" id="projectId" placeholder="Project ID">
+                    <input type="text" class="config-input" id="storageBucket" placeholder="Storage Bucket">
+                    <input type="text" class="config-input" id="messagingSenderId" placeholder="Messaging Sender ID">
+                    <input type="text" class="config-input" id="appId" placeholder="App ID">
+
+                    <button class="btn btn-warning" onclick="connectFirebase()">🔗 连接Firebase</button>
+                    <button class="btn btn-info" onclick="showConfigGuide()">📖 配置指南</button>
+                    <button class="btn btn-primary" onclick="loadLocalConfig()">💾 加载保存的配置</button>
+                </div>
+
                 <!-- 上传区域 -->
                 <div class="upload-section">
                     <h3 class="section-title">📤 上传康复数据</h3>
@@ -366,7 +479,7 @@
                         <textarea id="jsonData" placeholder="粘贴从康复训练系统导出的JSON数据..."></textarea>
                     </div>
 
-                    <button class="btn btn-success" onclick="uploadRehabData()">
+                    <button class="btn btn-success" onclick="uploadRehabData()" id="uploadBtn" disabled>
                         📊 上传数据
                     </button>
                     <button class="btn btn-info" onclick="loadSampleData()">
@@ -395,6 +508,7 @@
                     </button>
                     <div class="data-list" id="dataList">
                         <div class="loading">
+                            <div class="spinner"></div>
                             点击"刷新列表"加载数据...
                         </div>
                     </div>
@@ -405,7 +519,7 @@
             <div class="content-area">
                 <div class="data-viewer" id="dataViewer">
                     <div class="loading">
-                        请从左侧选择一条康复数据进行查看
+                        请先配置Firebase连接，然后从左侧选择一条康复数据进行查看
                     </div>
                 </div>
             </div>
@@ -413,17 +527,23 @@
     </div>
 
     <script>
-        // 康复数据管理类
+        // Firebase配置和连接状态
+        let firebaseApp = null;
+        let db = null;
+        let isFirebaseConnected = false;
+
+        // 康复数据管理类 - Firebase版本
         class RehabDataManager {
             constructor() {
                 this.storageKey = 'rehabDataStorage';
+                this.configKey = 'firebaseConfig';
                 this.currentData = null;
                 this.dataList = [];
                 this.charts = {};
 
                 // 初始化
-                this.loadDataFromStorage();
                 this.setCurrentDate();
+                this.loadSavedConfig();
             }
 
             // 设置当前日期
@@ -431,7 +551,39 @@
                 document.getElementById('trainingDate').value = new Date().toISOString().split('T')[0];
             }
 
-            // 从localStorage加载数据
+            // 加载保存的Firebase配置
+            loadSavedConfig() {
+                try {
+                    const saved = localStorage.getItem(this.configKey);
+                    if (saved) {
+                        const config = JSON.parse(saved);
+                        document.getElementById('apiKey').value = config.apiKey || '';
+                        document.getElementById('authDomain').value = config.authDomain || '';
+                        document.getElementById('projectId').value = config.projectId || '';
+                        document.getElementById('storageBucket').value = config.storageBucket || '';
+                        document.getElementById('messagingSenderId').value = config.messagingSenderId || '';
+                        document.getElementById('appId').value = config.appId || '';
+
+                        // 自动尝试连接
+                        if (config.apiKey && config.projectId) {
+                            setTimeout(() => connectFirebase(), 1000);
+                        }
+                    }
+                } catch (error) {
+                    console.error('加载配置失败:', error);
+                }
+            }
+
+            // 保存Firebase配置
+            saveConfig(config) {
+                try {
+                    localStorage.setItem(this.configKey, JSON.stringify(config));
+                } catch (error) {
+                    console.error('保存配置失败:', error);
+                }
+            }
+
+            // 从localStorage加载数据（降级方案）
             loadDataFromStorage() {
                 try {
                     const stored = localStorage.getItem(this.storageKey);
@@ -442,27 +594,22 @@
                 }
             }
 
-            // 保存数据到localStorage
+            // 保存数据到localStorage（降级方案）
             saveDataToStorage() {
                 try {
                     localStorage.setItem(this.storageKey, JSON.stringify(this.dataList));
                 } catch (error) {
                     console.error('保存数据失败:', error);
-                    alert('保存数据失败，存储空间可能不足');
                 }
             }
 
-            // 上传康复数据
-            uploadData(patientName, trainingDate, jsonData) {
+            // 上传康复数据到Firebase
+            async uploadData(patientName, trainingDate, jsonData) {
                 try {
                     const rehabData = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
 
-                    // 生成唯一ID
-                    const dataId = 'rehab_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-
                     // 构建数据条目
                     const dataEntry = {
-                        id: dataId,
                         patientName: patientName,
                         trainingDate: trainingDate,
                         uploadTime: new Date().toISOString(),
@@ -470,17 +617,31 @@
                         summary: this.generateSummary(rehabData)
                     };
 
-                    // 添加到列表
-                    this.dataList.unshift(dataEntry); // 最新的在前面
+                    if (isFirebaseConnected && db) {
+                        // 保存到Firebase
+                        const docRef = await db.collection('rehabData').add({
+                            ...dataEntry,
+                            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                        });
 
-                    // 保存到存储
-                    this.saveDataToStorage();
+                        return {
+                            success: true,
+                            dataId: docRef.id,
+                            message: '数据已保存到Firebase云端'
+                        };
+                    } else {
+                        // 降级到本地存储
+                        const dataId = 'rehab_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                        dataEntry.id = dataId;
+                        this.dataList.unshift(dataEntry);
+                        this.saveDataToStorage();
 
-                    return {
-                        success: true,
-                        dataId: dataId,
-                        message: '数据上传成功'
-                    };
+                        return {
+                            success: true,
+                            dataId: dataId,
+                            message: '数据已保存到本地存储（Firebase未连接）'
+                        };
+                    }
                 } catch (error) {
                     return {
                         success: false,
@@ -500,48 +661,111 @@
                 };
             }
 
-            // 获取数据列表
-            getDataList() {
-                return this.dataList.map(item => ({
-                    id: item.id,
-                    patientName: item.patientName,
-                    trainingDate: item.trainingDate,
-                    uploadTime: item.uploadTime,
-                    summary: item.summary
-                }));
+            // 从Firebase获取数据列表
+            async getDataList() {
+                if (isFirebaseConnected && db) {
+                    try {
+                        const snapshot = await db.collection('rehabData')
+                            .orderBy('timestamp', 'desc')
+                            .get();
+
+                        const dataList = [];
+                        snapshot.forEach(doc => {
+                            const data = doc.data();
+                            dataList.push({
+                                id: doc.id,
+                                patientName: data.patientName,
+                                trainingDate: data.trainingDate,
+                                uploadTime: data.uploadTime,
+                                timestamp: data.timestamp,
+                                summary: data.summary
+                            });
+                        });
+
+                        return dataList;
+                    } catch (error) {
+                        console.error('Firebase获取数据失败:', error);
+                        throw error;
+                    }
+                } else {
+                    // 从本地存储获取
+                    this.loadDataFromStorage();
+                    return this.dataList.map(item => ({
+                        id: item.id,
+                        patientName: item.patientName,
+                        trainingDate: item.trainingDate,
+                        uploadTime: item.uploadTime,
+                        summary: item.summary
+                    }));
+                }
             }
 
             // 根据ID获取数据
-            getDataById(id) {
-                const item = this.dataList.find(item => item.id === id);
-                return item ? item.data : null;
+            async getDataById(id) {
+                if (isFirebaseConnected && db) {
+                    try {
+                        const doc = await db.collection('rehabData').doc(id).get();
+                        if (doc.exists) {
+                            return doc.data().data;
+                        } else {
+                            return null;
+                        }
+                    } catch (error) {
+                        console.error('Firebase获取数据失败:', error);
+                        return null;
+                    }
+                } else {
+                    // 从本地存储获取
+                    this.loadDataFromStorage();
+                    const item = this.dataList.find(item => item.id === id);
+                    return item ? item.data : null;
+                }
             }
 
             // 删除数据
-            deleteData(id) {
-                const index = this.dataList.findIndex(item => item.id === id);
-                if (index !== -1) {
-                    this.dataList.splice(index, 1);
-                    this.saveDataToStorage();
-                    return true;
+            async deleteData(id) {
+                if (isFirebaseConnected && db) {
+                    try {
+                        await db.collection('rehabData').doc(id).delete();
+                        return true;
+                    } catch (error) {
+                        console.error('Firebase删除数据失败:', error);
+                        return false;
+                    }
+                } else {
+                    // 从本地存储删除
+                    this.loadDataFromStorage();
+                    const index = this.dataList.findIndex(item => item.id === id);
+                    if (index !== -1) {
+                        this.dataList.splice(index, 1);
+                        this.saveDataToStorage();
+                        return true;
+                    }
+                    return false;
                 }
-                return false;
             }
 
             // 生成API响应
             generateApiResponse(type, param) {
+                // 这个方法保持不变，用于API模拟
                 if (type === 'list') {
                     return {
                         success: true,
                         count: this.dataList.length,
-                        data: this.getDataList()
+                        data: this.dataList.map(item => ({
+                            id: item.id,
+                            patientName: item.patientName,
+                            trainingDate: item.trainingDate,
+                            uploadTime: item.uploadTime,
+                            summary: item.summary
+                        }))
                     };
                 } else if (type === 'detail' && param) {
-                    const data = this.getDataById(param);
-                    if (data) {
+                    const item = this.dataList.find(item => item.id === param);
+                    if (item) {
                         return {
                             success: true,
-                            data: data
+                            data: item.data
                         };
                     } else {
                         return {
@@ -560,8 +784,100 @@
         // 全局实例
         const rehabManager = new RehabDataManager();
 
+        // 更新连接状态显示
+        function updateConnectionStatus(status, message) {
+            const statusEl = document.getElementById('connectionStatus');
+            statusEl.className = `connection-status status-${status}`;
+            statusEl.textContent = message;
+        }
+
+        // 连接Firebase
+        function connectFirebase() {
+            const config = {
+                apiKey: document.getElementById('apiKey').value.trim(),
+                authDomain: document.getElementById('authDomain').value.trim(),
+                projectId: document.getElementById('projectId').value.trim(),
+                storageBucket: document.getElementById('storageBucket').value.trim(),
+                messagingSenderId: document.getElementById('messagingSenderId').value.trim(),
+                appId: document.getElementById('appId').value.trim()
+            };
+
+            // 验证配置
+            if (!config.apiKey || !config.projectId) {
+                showStatusMessage('error', '请填写至少API Key和Project ID');
+                return;
+            }
+
+            updateConnectionStatus('connecting', '正在连接Firebase...');
+
+            try {
+                // 初始化Firebase
+                if (firebaseApp) {
+                    firebaseApp.delete();
+                }
+
+                firebaseApp = firebase.initializeApp(config);
+                db = firebase.firestore();
+                isFirebaseConnected = true;
+
+                // 保存配置
+                rehabManager.saveConfig(config);
+
+                // 测试连接
+                db.collection('rehabData').limit(1).get()
+                    .then(() => {
+                        updateConnectionStatus('connected', '✅ Firebase已连接');
+                        document.getElementById('uploadBtn').disabled = false;
+                        showStatusMessage('success', 'Firebase连接成功！可以开始使用云端存储');
+
+                        // 隐藏配置区域
+                        document.getElementById('firebaseConfig').style.display = 'none';
+
+                        // 自动加载数据
+                        loadDataList();
+                    })
+                    .catch(error => {
+                        console.error('Firebase连接测试失败:', error);
+                        updateConnectionStatus('disconnected', '❌ 连接失败');
+                        isFirebaseConnected = false;
+                        showStatusMessage('error', 'Firebase连接失败: ' + error.message);
+                    });
+
+            } catch (error) {
+                console.error('Firebase初始化失败:', error);
+                updateConnectionStatus('disconnected', '❌ 初始化失败');
+                isFirebaseConnected = false;
+                showStatusMessage('error', 'Firebase初始化失败: ' + error.message);
+            }
+        }
+
+        // 显示配置指南
+        function showConfigGuide() {
+            alert(`Firebase配置步骤：
+
+1. 访问 https://console.firebase.google.com/
+2. 创建项目或选择现有项目
+3. 点击"添加应用" -> 选择"Web"
+4. 输入应用名称（如：康复数据管理系统）
+5. 复制配置信息并填入上方表单
+6. 启用Firestore数据库（测试模式）
+7. 点击"连接Firebase"
+
+配置示例：
+apiKey: "AIzaSyC..."
+authDomain: "your-project.firebaseapp.com"
+projectId: "your-project-id"
+...其他配置项`);
+        }
+
+        // 加载保存的配置
+        function loadLocalConfig() {
+            rehabManager.loadSavedConfig();
+            showStatusMessage('success', '已加载保存的配置');
+        }
+
         // 上传康复数据
-        function uploadRehabData() {
+        async function uploadRehabData() {
             const patientName = document.getElementById('patientName').value.trim();
             const trainingDate = document.getElementById('trainingDate').value;
             const jsonData = document.getElementById('jsonData').value.trim();
@@ -581,19 +897,31 @@
                 return;
             }
 
-            const result = rehabManager.uploadData(patientName, trainingDate, jsonData);
+            // 禁用按钮防止重复提交
+            const uploadBtn = document.getElementById('uploadBtn');
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = '正在上传...';
 
-            if (result.success) {
-                showStatusMessage('success', `✅ 数据上传成功！数据ID: ${result.dataId}`);
+            try {
+                const result = await rehabManager.uploadData(patientName, trainingDate, jsonData);
 
-                // 清空表单
-                document.getElementById('patientName').value = '';
-                document.getElementById('jsonData').value = '';
+                if (result.success) {
+                    showStatusMessage('success', `✅ ${result.message}，数据ID: ${result.dataId}`);
 
-                // 刷新列表
-                loadDataList();
-            } else {
-                showStatusMessage('error', `❌ 上传失败: ${result.error}`);
+                    // 清空表单
+                    document.getElementById('patientName').value = '';
+                    document.getElementById('jsonData').value = '';
+
+                    // 刷新列表
+                    loadDataList();
+                } else {
+                    showStatusMessage('error', `❌ 上传失败: ${result.error}`);
+                }
+            } catch (error) {
+                showStatusMessage('error', `❌ 上传异常: ${error.message}`);
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = '📊 上传数据';
             }
         }
 
@@ -632,7 +960,7 @@
                     }
                 },
                 "angleData": {
-                    "name": "指关节耦合角度曲线数据",
+                    "name": "指关节屈伸角度曲线数据",
                     "unit": "度(°)",
                     "values": Array.from({ length: 64 }, (_, i) => ({
                         timePoint: i + 1,
@@ -655,60 +983,79 @@
         }
 
         // 加载数据列表
-        function loadDataList() {
-            const dataList = rehabManager.getDataList();
+        async function loadDataList() {
             const container = document.getElementById('dataList');
+            container.innerHTML = '<div class="loading"><div class="spinner"></div>正在加载数据...</div>';
 
-            if (dataList.length === 0) {
-                container.innerHTML = '<div class="loading">暂无数据</div>';
-                return;
+            try {
+                const dataList = await rehabManager.getDataList();
+
+                if (dataList.length === 0) {
+                    container.innerHTML = '<div class="loading">暂无数据</div>';
+                    return;
+                }
+
+                let html = '';
+                dataList.forEach(item => {
+                    const uploadDate = new Date(item.uploadTime).toLocaleString('zh-CN');
+                    const trainingDate = new Date(item.trainingDate).toLocaleDateString('zh-CN');
+
+                    html += `
+                        <div class="data-item" onclick="selectData('${item.id}')">
+                            <div class="data-item-header">
+                                <div class="data-item-title">${item.patientName}</div>
+                                <div class="data-item-date">${trainingDate}</div>
+                            </div>
+                            <div class="data-item-info">
+                                训练时长: ${item.summary.duration} | 
+                                完成率: ${item.summary.completionRate} | 
+                                数据点: ${item.summary.dataPoints}
+                            </div>
+                            <div class="data-item-info" style="margin-top: 3px; font-size: 11px;">
+                                上传时间: ${uploadDate}
+                            </div>
+                        </div>
+                    `;
+                });
+
+                container.innerHTML = html;
+                showStatusMessage('success', `✅ 已加载 ${dataList.length} 条数据`);
+
+            } catch (error) {
+                console.error('加载数据失败:', error);
+                container.innerHTML = '<div class="loading">❌ 加载失败</div>';
+                showStatusMessage('error', '❌ 加载数据失败: ' + error.message);
             }
-
-            let html = '';
-            dataList.forEach(item => {
-                const uploadDate = new Date(item.uploadTime).toLocaleString('zh-CN');
-                const trainingDate = new Date(item.trainingDate).toLocaleDateString('zh-CN');
-
-                html += `
-                    <div class="data-item" onclick="selectData('${item.id}')">
-                        <div class="data-item-header">
-                            <div class="data-item-title">${item.patientName}</div>
-                            <div class="data-item-date">${trainingDate}</div>
-                        </div>
-                        <div class="data-item-info">
-                            训练时长: ${item.summary.duration} | 
-                            完成率: ${item.summary.completionRate} | 
-                            数据点: ${item.summary.dataPoints}
-                        </div>
-                        <div class="data-item-info" style="margin-top: 3px; font-size: 11px;">
-                            上传时间: ${uploadDate}
-                        </div>
-                    </div>
-                `;
-            });
-
-            container.innerHTML = html;
-
-            showStatusMessage('success', `✅ 已加载 ${dataList.length} 条数据`);
         }
 
         // 选择数据
-        function selectData(id) {
+        async function selectData(id) {
             // 更新选中状态
             document.querySelectorAll('.data-item').forEach(item => {
                 item.classList.remove('selected');
             });
             event.target.closest('.data-item').classList.add('selected');
 
-            // 获取数据
-            const data = rehabManager.getDataById(id);
-            if (!data) {
-                showStatusMessage('error', '❌ 数据不存在');
-                return;
-            }
+            // 显示加载状态
+            const viewer = document.getElementById('dataViewer');
+            viewer.innerHTML = '<div class="loading"><div class="spinner"></div>正在加载数据详情...</div>';
 
-            // 显示数据
-            displayRehabData(data, id);
+            try {
+                // 获取数据
+                const data = await rehabManager.getDataById(id);
+                if (!data) {
+                    showStatusMessage('error', '❌ 数据不存在');
+                    viewer.innerHTML = '<div class="loading">❌ 数据不存在</div>';
+                    return;
+                }
+
+                // 显示数据
+                displayRehabData(data, id);
+            } catch (error) {
+                console.error('获取数据失败:', error);
+                showStatusMessage('error', '❌ 获取数据失败: ' + error.message);
+                viewer.innerHTML = '<div class="loading">❌ 获取数据失败</div>';
+            }
         }
 
         // 显示康复数据
@@ -750,6 +1097,9 @@
                         <button class="btn btn-info" onclick="downloadJson('${dataId}')">
                             💾 下载JSON
                         </button>
+                        <button class="btn btn-warning" onclick="deleteDataConfirm('${dataId}')">
+                            🗑️ 删除数据
+                        </button>
                     </div>
                 </div>
                 
@@ -761,7 +1111,7 @@
                         </div>
                     </div>
                     <div class="chart-card">
-                        <div class="chart-title">🤏 关节角度曲线</div>
+                        <div class="chart-title">🤲 关节角度曲线</div>
                         <div class="chart-container">
                             <canvas id="angleChart"></canvas>
                         </div>
@@ -899,20 +1249,43 @@
 
         // 下载JSON
         function downloadJson(dataId) {
-            const data = rehabManager.getDataById(dataId);
-            if (!data) return;
+            rehabManager.getDataById(dataId).then(data => {
+                if (!data) return;
 
-            const jsonString = JSON.stringify(data, null, 2);
-            const blob = new Blob([jsonString], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
+                const jsonString = JSON.stringify(data, null, 2);
+                const blob = new Blob([jsonString], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
 
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `康复数据_${data.patientInfo?.name || '患者'}_${dataId}.json`;
-            link.click();
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `康复数据_${data.patientInfo?.name || '患者'}_${dataId}.json`;
+                link.click();
 
-            URL.revokeObjectURL(url);
-            showStatusMessage('success', '✅ JSON文件已下载');
+                URL.revokeObjectURL(url);
+                showStatusMessage('success', '✅ JSON文件已下载');
+            });
+        }
+
+        // 删除数据确认
+        async function deleteDataConfirm(dataId) {
+            if (!confirm('确定要删除这条康复数据吗？此操作不可恢复！')) {
+                return;
+            }
+
+            try {
+                const success = await rehabManager.deleteData(dataId);
+                if (success) {
+                    showStatusMessage('success', '✅ 数据已删除');
+                    loadDataList();
+
+                    // 清空查看器
+                    document.getElementById('dataViewer').innerHTML = '<div class="loading">请从左侧选择一条康复数据进行查看</div>';
+                } else {
+                    showStatusMessage('error', '❌ 删除失败');
+                }
+            } catch (error) {
+                showStatusMessage('error', '❌ 删除异常: ' + error.message);
+            }
         }
 
         // 显示状态消息
@@ -976,12 +1349,21 @@ ${JSON.stringify(response, null, 2)}
             }
 
             // 正常页面初始化
-            loadDataList();
+            updateConnectionStatus('disconnected', '⚠️ 未连接Firebase');
+
+            // 如果没有保存的配置，则启用上传按钮（使用本地存储）
+            const savedConfig = localStorage.getItem('firebaseConfig');
+            if (!savedConfig) {
+                document.getElementById('uploadBtn').disabled = false;
+                showStatusMessage('warning', '⚠️ Firebase未配置，将使用本地存储（数据不能多设备同步）');
+            }
 
             // 显示使用说明
             setTimeout(() => {
-                showStatusMessage('success', '✅ 系统已就绪！可以上传康复数据，他人通过API链接访问数据');
-            }, 500);
+                if (!isFirebaseConnected) {
+                    showStatusMessage('success', '✅ 系统已就绪！请先配置Firebase以启用云端同步，或直接使用本地存储功能');
+                }
+            }, 1000);
         });
 
         // 导出API访问方法供外部使用
@@ -996,7 +1378,10 @@ ${JSON.stringify(response, null, 2)}
             getAllData: () => ({
                 success: true,
                 data: rehabManager.dataList
-            })
+            }),
+
+            // 检查Firebase连接状态
+            isConnected: () => isFirebaseConnected
         };
     </script>
 </body>
